@@ -1,0 +1,21 @@
+{
+  "name": "swarn",
+  "version": "0.1.0",
+  "description": "Agentic swarm platform — execute plans with parallel worker agents",
+  "type": "module",
+  "bin": {
+    "swarn": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.8.0"
+  }
+}
