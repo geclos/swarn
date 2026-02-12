@@ -125,7 +125,7 @@ export function executeJudge(
 				format: { type: "json_schema", schema: JUDGE_SCHEMA },
 			});
 
-			const verdict = parseVerdict(response.text);
+			const verdict = parseVerdict(response.text, response.structuredOutput);
 			yield* logJudge(`Verdict: ${verdict.verdict} (score: ${verdict.score})`);
 
 			if (verdict.failedTasks.length > 0) {
@@ -147,13 +147,59 @@ export function executeJudge(
 	});
 }
 
-function parseVerdict(text: string): JudgeVerdict {
+function parseVerdict(text: string, structuredOutput?: unknown): JudgeVerdict {
+	const coerceScore = (
+		score: unknown,
+		verdict: "done" | "iterate" | "fail",
+	): number => {
+		if (typeof score === "number" && !Number.isNaN(score)) {
+			return Math.max(0, Math.min(100, score));
+		}
+		if (typeof score === "string" && score.trim() !== "") {
+			const parsed = Number(score);
+			if (!Number.isNaN(parsed)) {
+				return Math.max(0, Math.min(100, parsed));
+			}
+		}
+		return verdict === "done" ? 80 : verdict === "fail" ? 10 : 40;
+	};
+
+	const coerceVerdict = (value: unknown): "done" | "iterate" | "fail" => {
+		if (value === "done" || value === "iterate" || value === "fail") {
+			return value;
+		}
+		return "iterate";
+	};
+
+	const fromStructured = (value: unknown): JudgeVerdict | null => {
+		if (!value || typeof value !== "object") return null;
+		const record = value as Record<string, unknown>;
+		const verdict = coerceVerdict(record.verdict);
+		const failedTasks = Array.isArray(record.failedTasks)
+			? (record.failedTasks as JudgeVerdict["failedTasks"])
+			: [];
+		const feedback =
+			typeof record.feedback === "string" ? record.feedback : text.slice(-500);
+		return {
+			verdict,
+			score: coerceScore(record.score, verdict),
+			feedback,
+			failedTasks,
+		};
+	};
+
+	const structuredVerdict = fromStructured(structuredOutput);
+	if (structuredVerdict) {
+		return structuredVerdict;
+	}
+
 	try {
 		const parsed = JSON.parse(text) as Partial<JudgeVerdict>;
+		const verdict = coerceVerdict(parsed.verdict);
 		// Ensure all required fields are present with defaults
 		return {
-			verdict: parsed.verdict ?? "iterate",
-			score: parsed.score ?? 0,
+			verdict,
+			score: coerceScore(parsed.score, verdict),
 			feedback: parsed.feedback ?? text.slice(-500),
 			failedTasks: parsed.failedTasks ?? [],
 		};
@@ -161,9 +207,10 @@ function parseVerdict(text: string): JudgeVerdict {
 		// Best-effort extraction if JSON parsing fails
 		const isDone =
 			/verdict.*done/i.test(text) || /all tasks.*complet/i.test(text);
+		const verdict = isDone ? "done" : "iterate";
 		return {
-			verdict: isDone ? "done" : "iterate",
-			score: isDone ? 80 : 40,
+			verdict,
+			score: coerceScore(undefined, verdict),
 			feedback: text.slice(-500),
 			failedTasks: [],
 		};

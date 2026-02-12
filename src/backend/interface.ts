@@ -22,6 +22,7 @@ export interface JsonSchemaFormat {
 export interface AgentResponse {
 	text: string;
 	parts: unknown[];
+	structuredOutput?: unknown;
 	tokens: { input: number; output: number };
 	cost: number;
 }

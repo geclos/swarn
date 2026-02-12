@@ -48,10 +48,8 @@ const program = Effect.gen(function* () {
 			new ValidationError({ message: "Backend not available" }),
 		);
 	}
-	yield* logSuccess(`Connected to OpenCode server at ${config.serverUrl}`);
 
 	yield* backend.allowAllPermissions();
-	yield* logSuccess("Permissions set to allow");
 
 	// Create git worktree for isolation
 	let worktreeResult: WorktreeResult | undefined;
@@ -125,6 +123,7 @@ const program = Effect.gen(function* () {
 
 		if (Either.isRight(publishResult)) {
 			yield* logSuccess(`Results published: ${publishResult.right.prUrl}`);
+			stats.prUrl = publishResult.right.prUrl;
 		} else {
 			const error = publishResult.left;
 			if (error._tag === "PublishError") {

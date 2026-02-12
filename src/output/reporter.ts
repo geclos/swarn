@@ -27,5 +27,9 @@ export function printReport(stats: RunStats): void {
 		console.log(`\n  Worktree:      ${stats.worktreePath}`);
 	}
 
+	if (stats.prUrl) {
+		console.log(`\n  Pull Request:  \x1b[34m${stats.prUrl}\x1b[0m`);
+	}
+
 	console.log();
 }

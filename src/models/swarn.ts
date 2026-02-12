@@ -41,6 +41,7 @@ export interface RunStats {
 	filesChanged: string[];
 	duration: number;
 	worktreePath?: string;
+	prUrl?: string;
 }
 
 export interface ProgressStats {

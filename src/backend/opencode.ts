@@ -199,6 +199,9 @@ export class OpenCodeBackend implements AgentBackend {
 			let textParts = parts
 				.filter((p): p is TextPart => p.type === "text")
 				.map((p) => (p as TextPart).text);
+			let structuredOutput = (
+				info as { structured_output?: unknown } | undefined
+			)?.structured_output;
 
 			if (textParts.length === 0 && model) {
 				yield* logDebug(
@@ -230,6 +233,8 @@ export class OpenCodeBackend implements AgentBackend {
 				textParts = parts
 					.filter((p): p is TextPart => p.type === "text")
 					.map((p) => (p as TextPart).text);
+				structuredOutput = (info as { structured_output?: unknown } | undefined)
+					?.structured_output;
 			}
 
 			if (textParts.length === 0) {
@@ -269,6 +274,7 @@ export class OpenCodeBackend implements AgentBackend {
 			return {
 				text: textParts.join("\n"),
 				parts,
+				structuredOutput,
 				tokens: {
 					input: info?.tokens?.input ?? 0,
 					output: info?.tokens?.output ?? 0,
