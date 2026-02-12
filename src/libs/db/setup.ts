@@ -1,52 +1,26 @@
 import type { Database } from "bun:sqlite";
+import { runMigrations } from "./migrate.js";
+import { initialSchema } from "./migrations/001_initial_schema.js";
+import { addBranchColumn } from "./migrations/002_add_branch_column.js";
+
+export const migrations = [initialSchema, addBranchColumn];
 
 export function ensureTables(sqlite: Database): void {
-	sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS swarms (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      status          TEXT NOT NULL,
-      working_dir     TEXT NOT NULL,
-      plan            TEXT NOT NULL,
-      config          TEXT NOT NULL,
-      iteration       INTEGER NOT NULL DEFAULT 0,
-      max_iterations  INTEGER NOT NULL,
-      tasks_total     INTEGER NOT NULL DEFAULT 0,
-      tasks_completed INTEGER NOT NULL DEFAULT 0,
-      tasks_failed    INTEGER NOT NULL DEFAULT 0,
-      tokens_in       INTEGER NOT NULL DEFAULT 0,
-      tokens_out      INTEGER NOT NULL DEFAULT 0,
-      cost            REAL NOT NULL DEFAULT 0,
-      error           TEXT,
-      pid             INTEGER NOT NULL,
-      created_at      TEXT NOT NULL,
-      updated_at      TEXT NOT NULL
-    )
-  `);
+	runMigrations(sqlite, migrations, "up");
+}
 
-	sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      swarm_id        INTEGER NOT NULL REFERENCES swarms(id),
-      title           TEXT NOT NULL,
-      description     TEXT NOT NULL,
-      status          TEXT NOT NULL,
-      file_paths      TEXT NOT NULL,
-      claimed_by      TEXT,
-      result_summary  TEXT,
-      files_modified  TEXT,
-      error           TEXT,
-      iteration       INTEGER NOT NULL DEFAULT 0,
-      judge_feedback  TEXT,
-      created_at      TEXT NOT NULL,
-      updated_at      TEXT NOT NULL
-    )
-  `);
+export function rollbackMigration(sqlite: Database, target?: string): void {
+	runMigrations(sqlite, migrations, "down", target);
+}
 
-	sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS task_deps (
-      task_id        INTEGER NOT NULL REFERENCES tasks(id),
-      depends_on     INTEGER NOT NULL REFERENCES tasks(id),
-      PRIMARY KEY (task_id, depends_on)
-    )
-  `);
+export function listMigrations(sqlite: Database): {
+	name: string;
+	applied: boolean;
+}[] {
+	const { getAppliedMigrations } = require("./migrate.js");
+	const applied = getAppliedMigrations(sqlite);
+	return migrations.map((m) => ({
+		name: m.name,
+		applied: applied.has(m.name),
+	}));
 }

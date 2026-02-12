@@ -3,7 +3,6 @@ import type { AgentBackend } from "../backend/interface.js";
 import type { PromptError, SessionError } from "../models/errors.js";
 import type { Task, TaskResult } from "../models/task.js";
 import { logError, logWorker } from "../output/logger.js";
-import { WORKER_MODEL } from "./models.js";
 
 function workerPrompt(task: Task): string {
 	let prompt = `You are a focused engineer implementing one specific task. Complete the task fully — no TODOs, no placeholders. Follow existing code patterns and conventions. Stay within scope (only modify files relevant to the task). Run tests/lint if available to verify work. When done, summarize what you changed.
@@ -53,7 +52,6 @@ export function executeWorker(
 				mode: "build",
 				workingDir,
 				model: model ?? undefined,
-				thinking: model ? WORKER_MODEL.thinking : undefined,
 			}),
 		);
 

@@ -10,7 +10,12 @@ export function isGitRepo(dir: string): boolean {
 	return result.exitCode === 0;
 }
 
-export function createWorktree(projectDir: string): string {
+export interface WorktreeResult {
+	path: string;
+	branch: string;
+}
+
+export function createWorktree(projectDir: string): WorktreeResult {
 	const timestamp = Date.now();
 	const name = `${basename(projectDir)}-${timestamp}`;
 	const worktreePath = join(SWARN_WORKTREES, name);
@@ -26,7 +31,7 @@ export function createWorktree(projectDir: string): string {
 		throw new Error(`Failed to create worktree: ${stderr}`);
 	}
 
-	return worktreePath;
+	return { path: worktreePath, branch };
 }
 
 export function removeWorktree(projectDir: string, worktreePath: string): void {

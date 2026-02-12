@@ -6,6 +6,7 @@ export function registerSwarm(
 	client: DbClient,
 	plan: PlanTask[],
 	config: SwarnConfig,
+	branch?: string,
 ): number {
 	const now = new Date().toISOString();
 	const result = client.db
@@ -13,6 +14,7 @@ export function registerSwarm(
 		.values({
 			status: "running",
 			workingDir: config.workingDir,
+			branch: branch ?? null,
 			plan: JSON.stringify(plan),
 			config: JSON.stringify(config),
 			maxIterations: config.maxIterations,

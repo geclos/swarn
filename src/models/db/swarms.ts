@@ -5,6 +5,7 @@ export const swarms = sqliteTable("swarms", {
 	id: integer("id").primaryKey({ autoIncrement: true }),
 	status: text("status").notNull(),
 	workingDir: text("working_dir").notNull(),
+	branch: text("branch"),
 	plan: text("plan").notNull(),
 	config: text("config").notNull(),
 	iteration: integer("iteration").notNull().default(0),
@@ -25,6 +26,7 @@ export interface SwarmRow {
 	id: number;
 	status: SwarmStatus;
 	workingDir: string;
+	branch: string | null;
 	plan: string;
 	config: string;
 	iteration: number;

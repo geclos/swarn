@@ -4,7 +4,6 @@ import type { PromptError, SessionError } from "../models/errors.js";
 import type { JudgeVerdict } from "../models/swarn.js";
 import type { Task } from "../models/task.js";
 import { logJudge } from "../output/logger.js";
-import { JUDGE_MODEL } from "./models.js";
 
 function judgePrompt(
 	plan: Task[],
@@ -86,7 +85,6 @@ export function executeJudge(
 			mode: "build",
 			workingDir,
 			model: model ?? undefined,
-			thinking: model ? JUDGE_MODEL.thinking : undefined,
 		});
 
 		try {

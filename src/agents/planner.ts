@@ -3,7 +3,6 @@ import type { AgentBackend } from "../backend/interface.js";
 import { PromptError, type SessionError } from "../models/errors.js";
 import type { PlanTask } from "../models/swarn.js";
 import { logDebug, logInfo } from "../output/logger.js";
-import { PLANNER_MODEL } from "./models.js";
 
 function plannerPrompt(rawPlan: string): string {
 	return `You are a senior software architect. You receive a high-level user request and must produce a detailed, actionable execution plan.
@@ -77,7 +76,6 @@ export function executePlanner(
 			mode: "build",
 			workingDir,
 			model: model ?? undefined,
-			thinking: model ? PLANNER_MODEL.thinking : undefined,
 		});
 
 		try {

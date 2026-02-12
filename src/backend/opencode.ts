@@ -1,4 +1,10 @@
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/v2";
+import {
+	createOpencodeClient,
+	type OpencodeClient,
+	type PermissionConfig,
+	type SessionPromptResponses,
+	type TextPart,
+} from "@opencode-ai/sdk/v2";
 import { Effect, Either } from "effect";
 import { PromptError, SessionError } from "../models/errors.js";
 import { logDebug } from "../output/logger.js";
@@ -8,6 +14,24 @@ import type {
 	PromptOpts,
 	SessionOpts,
 } from "./interface.js";
+
+interface PromptParams {
+	sessionID: string;
+	directory?: string;
+	messageID?: string;
+	model?: {
+		providerID: string;
+		modelID: string;
+	};
+	agent?: string;
+	noReply?: boolean;
+	tools?: {
+		[key: string]: boolean;
+	};
+	system?: string;
+	variant?: string;
+	parts: Array<{ type: "text"; text: string }>;
+}
 
 export class OpenCodeBackend implements AgentBackend {
 	private client: OpencodeClient;
@@ -42,8 +66,11 @@ export class OpenCodeBackend implements AgentBackend {
 				Effect.tryPromise(() =>
 					this.client.global.config.update({
 						config: {
-							permission: { "*": "allow", external_directory: "allow" },
-						} as any,
+							permission: {
+								"*": "allow",
+								external_directory: "allow",
+							} as PermissionConfig,
+						},
 					}),
 				),
 			);
@@ -123,7 +150,7 @@ export class OpenCodeBackend implements AgentBackend {
 			const model = this.sessionModels.get(sessionId);
 
 			const runPrompt = async (useModel: boolean) => {
-				const params: any = {
+				const params: PromptParams = {
 					sessionID: sessionId,
 					directory,
 					parts: [{ type: "text", text: message }],
@@ -173,11 +200,12 @@ export class OpenCodeBackend implements AgentBackend {
 				});
 			}
 
-			let info = (promptResp.data as any).info;
-			let parts = (promptResp.data as any).parts ?? [];
+			const promptData = promptResp.data as SessionPromptResponses[200];
+			let info = promptData.info;
+			let parts = promptData.parts ?? [];
 			let textParts = parts
-				.filter((p: any) => p.type === "text")
-				.map((p: any) => p.text);
+				.filter((p): p is TextPart => p.type === "text")
+				.map((p) => (p as TextPart).text);
 
 			if (textParts.length === 0 && model) {
 				yield* logDebug(
@@ -203,16 +231,17 @@ export class OpenCodeBackend implements AgentBackend {
 					});
 				}
 
-				info = (promptResp.data as any).info;
-				parts = (promptResp.data as any).parts ?? [];
+				const retryData = promptResp.data as SessionPromptResponses[200];
+				info = retryData.info;
+				parts = retryData.parts ?? [];
 				textParts = parts
-					.filter((p: any) => p.type === "text")
-					.map((p: any) => p.text);
+					.filter((p): p is TextPart => p.type === "text")
+					.map((p) => (p as TextPart).text);
 			}
 
 			if (textParts.length === 0) {
-				const respData = (promptResp as any).data;
-				const partTypes = parts.map((p: any) => p.type).join(", ");
+				const respData = promptResp.data;
+				const partTypes = parts.map((p) => p.type).join(", ");
 				const infoKeys =
 					info && typeof info === "object"
 						? Object.keys(info).join(", ")
@@ -223,7 +252,9 @@ export class OpenCodeBackend implements AgentBackend {
 						: "none";
 				const dataType = respData === null ? "null" : typeof respData;
 				const dataPreview =
-					typeof respData === "string" ? respData.slice(0, 200) : "";
+					typeof respData === "string"
+						? (respData as string).slice(0, 200)
+						: "";
 				yield* logDebug(
 					`Prompt response had no text parts. Part types: ${partTypes || "none"}`,
 				);
