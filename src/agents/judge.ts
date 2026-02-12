@@ -5,6 +5,52 @@ import type { JudgeVerdict } from "../models/swarn.js";
 import type { Task } from "../models/task.js";
 import { logJudge } from "../output/logger.js";
 
+const JUDGE_SCHEMA = {
+	type: "object",
+	properties: {
+		verdict: {
+			type: "string",
+			enum: ["done", "iterate", "fail"],
+			description:
+				"Whether the implementation is complete ('done'), needs more work ('iterate'), or has critical failures ('fail')",
+		},
+		score: {
+			type: "number",
+			minimum: 0,
+			maximum: 100,
+			description: "Quality score from 0-100",
+		},
+		feedback: {
+			type: "string",
+			description: "Overall assessment of the implementation",
+		},
+		failedTasks: {
+			type: "array",
+			items: {
+				type: "object",
+				properties: {
+					taskId: {
+						type: "number",
+						description: "The ID of the task that failed or needs revision",
+					},
+					reason: {
+						type: "string",
+						description: "Explanation of what's wrong with the task",
+					},
+					suggestion: {
+						type: "string",
+						description: "Specific fix needed for the task",
+					},
+				},
+				required: ["taskId", "reason", "suggestion"],
+			},
+			description:
+				"Array of tasks that need revision (empty if verdict is 'done')",
+		},
+	},
+	required: ["verdict", "score", "feedback", "failedTasks"],
+};
+
 function judgePrompt(
 	plan: Task[],
 	completedTasks: Task[],
@@ -44,22 +90,7 @@ ${failedSummary || "None"}
 ## Instructions
 1. Review the code changes by examining the files listed in each completed task
 2. Check that each task's requirements from the plan were met
-3. Output your verdict as a JSON block:
-
-\`\`\`json
-{
-  "verdict": "done" | "iterate",
-  "score": <0-100>,
-  "feedback": "<overall assessment>",
-  "failedTasks": [
-    {
-      "taskId": <number>,
-      "reason": "<what's wrong>",
-      "suggestion": "<specific fix>"
-    }
-  ]
-}
-\`\`\``;
+3. Output your verdict as a JSON object with your assessment`;
 }
 
 export type JudgeError = SessionError | PromptError;
@@ -90,13 +121,19 @@ export function executeJudge(
 		try {
 			yield* logJudge("Reviewing task results...");
 			const prompt = judgePrompt(allTasks, completedTasks, failedTasks);
-			const response = yield* backend.prompt(sessionId, prompt);
+			const response = yield* backend.prompt(sessionId, prompt, {
+				format: { type: "json_schema", schema: JUDGE_SCHEMA },
+			});
 
 			const verdict = parseVerdict(response.text);
 			yield* logJudge(`Verdict: ${verdict.verdict} (score: ${verdict.score})`);
 
-			if (verdict.verdict === "iterate" && verdict.failedTasks.length > 0) {
+			if (verdict.failedTasks.length > 0) {
 				yield* logJudge(`${verdict.failedTasks.length} tasks need revision`);
+			}
+
+			if (verdict.verdict === "fail") {
+				yield* logJudge(`Critical failure detected: ${verdict.feedback}`);
 			}
 
 			return {
@@ -111,29 +148,24 @@ export function executeJudge(
 }
 
 function parseVerdict(text: string): JudgeVerdict {
-	const jsonMatch = text.match(/```json\n([\s\S]*?)```/);
-	if (jsonMatch?.[1]) {
-		try {
-			return JSON.parse(jsonMatch[1]) as JudgeVerdict;
-		} catch {
-			// fall through to defaults
-		}
-	}
-
-	// Try parsing the entire text as JSON
 	try {
-		return JSON.parse(text) as JudgeVerdict;
+		const parsed = JSON.parse(text) as Partial<JudgeVerdict>;
+		// Ensure all required fields are present with defaults
+		return {
+			verdict: parsed.verdict ?? "iterate",
+			score: parsed.score ?? 0,
+			feedback: parsed.feedback ?? text.slice(-500),
+			failedTasks: parsed.failedTasks ?? [],
+		};
 	} catch {
-		// fall through
+		// Best-effort extraction if JSON parsing fails
+		const isDone =
+			/verdict.*done/i.test(text) || /all tasks.*complet/i.test(text);
+		return {
+			verdict: isDone ? "done" : "iterate",
+			score: isDone ? 80 : 40,
+			feedback: text.slice(-500),
+			failedTasks: [],
+		};
 	}
-
-	// Best-effort extraction
-	const isDone =
-		/verdict.*done/i.test(text) || /all tasks.*complet/i.test(text);
-	return {
-		verdict: isDone ? "done" : "iterate",
-		score: isDone ? 80 : 40,
-		feedback: text.slice(-500),
-		failedTasks: [],
-	};
 }

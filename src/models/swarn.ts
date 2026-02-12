@@ -22,7 +22,7 @@ export interface SwarnConfig {
 }
 
 export interface JudgeVerdict {
-	verdict: "done" | "iterate";
+	verdict: "done" | "iterate" | "fail";
 	score: number;
 	feedback: string;
 	failedTasks: Array<{
@@ -40,6 +40,7 @@ export interface RunStats {
 	totalCost: number;
 	filesChanged: string[];
 	duration: number;
+	worktreePath?: string;
 }
 
 export interface ProgressStats {

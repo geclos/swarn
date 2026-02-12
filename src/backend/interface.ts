@@ -11,6 +11,12 @@ export interface SessionOpts {
 
 export interface PromptOpts {
 	agent?: string;
+	format?: JsonSchemaFormat;
+}
+
+export interface JsonSchemaFormat {
+	type: "json_schema";
+	schema: object;
 }
 
 export interface AgentResponse {

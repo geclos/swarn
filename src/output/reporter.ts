@@ -22,5 +22,10 @@ export function printReport(stats: RunStats): void {
 	);
 	console.log(`  Cost:          $${cost}`);
 	console.log(`  Duration:      ${duration}s`);
+
+	if (stats.worktreePath) {
+		console.log(`\n  Worktree:      ${stats.worktreePath}`);
+	}
+
 	console.log();
 }

@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
-    "lint": "tsc --noEmit && biome check src",
+    "tc": "tsc --noEmit",
+    "lint": "biome check src",
     "format": "biome format src --write",
     "check": "biome check src --write"
   },

@@ -9,10 +9,6 @@ export class PublishError extends Data.TaggedError("PublishError")<{
 
 export interface PublishParams {
 	workingDir: string;
-	branch: string;
-	prTitle: string;
-	prBody: string;
-	filesChanged: string[];
 }
 
 export interface PublishResult {
@@ -20,48 +16,49 @@ export interface PublishResult {
 	commitHash: string;
 }
 
-function publisherPrompt(params: PublishParams): string {
-	return `You are a git automation assistant. Your task is to commit all changes, push the branch to origin, and create a draft pull request.
+const PUBLISHER_SCHEMA = {
+	type: "object",
+	properties: {
+		success: {
+			type: "boolean",
+			description: "Whether the PR was created successfully",
+		},
+		prUrl: {
+			type: "string",
+			description: "URL of the created pull request (empty if failed)",
+		},
+		commitHash: {
+			type: "string",
+			description: "Git commit hash of the pushed changes (empty if failed)",
+		},
+		summary: {
+			type: "string",
+			description: "Brief summary of what was done or error message if failed",
+		},
+	},
+	required: ["success", "prUrl", "commitHash", "summary"],
+};
 
-## Git Context
+function publisherPrompt(): string {
+	return `You are a publishing agent. Your job is to commit all changes, push them to remote, and create a pull request. Use the same title/description in commit and PR.
 
-- Working directory: ${params.workingDir}
-- Branch: ${params.branch}
-- PR Title: ${params.prTitle}
+## Instructions
 
-## Files Changed
+1. Thoroughly analyze the git diff to understand what was done.
+2. Commit and push the branch to the remote repository
+3. Create a draft pull request using the GitHub CLI (gh pr create)
 
-${params.filesChanged.map((f) => `- ${f}`).join("\n")}
+# Tips
 
-## PR Body
-
-${params.prBody}
-
-## Your Tasks
-
-1. **Stage all changes**: Run \`git add -A\` to stage all modified and new files
-2. **Commit changes**: Create a commit with a descriptive message that summarizes the changes
-3. **Push to origin**: Push the branch to origin with \`git push -u origin ${params.branch}\`
-4. **Create draft PR**: Use the GitHub CLI to create a draft PR:
-   \`gh pr create --draft --title "${params.prTitle}" --body "..." --head ${params.branch}\`
-
-## Important Notes
-
-- Make sure to include all changed files in the commit
-- Use a clear, descriptive commit message that summarizes the work
-- The PR should be created as a DRAFT
-- If the gh CLI is not available or not authenticated, report the error
-- End your response with a summary block (see format below)
+- Use the commit-work skill if available to write the commit message.
 
 ## Output Format
 
-When done, end your response with:
-\`\`\`summary
-Success: true/false
-PR URL: <url or "failed">
-Commit: <commit hash or "failed">
-Summary: <brief description of what was done>
-\`\`\``;
+Output a JSON object with:
+- success: Whether the PR was created successfully
+- prUrl: URL of the created pull request (empty if failed)
+- commitHash: Git commit hash of the pushed changes (empty if failed)
+- summary: Brief summary of what was done or error message if failed`;
 }
 
 export type PublisherError = SessionError | PromptError | PublishError;
@@ -86,37 +83,44 @@ export function executePublisher(
 		if (Either.isLeft(sessionIdResult)) {
 			const error = sessionIdResult.left.message;
 			yield* logError(`Publisher failed to create session: ${error}`);
-			return yield* new PublishError({
-				message: `Failed to create session: ${error}`,
-			});
+			return yield* Effect.fail(
+				new PublishError({
+					message: `Failed to create session: ${error}`,
+				}),
+			);
 		}
 
 		const sessionId = sessionIdResult.right;
 
 		try {
-			const prompt = publisherPrompt(params);
-			yield* logInfo("Publisher agent committing and pushing changes...");
+			const prompt = publisherPrompt();
+			yield* logInfo("Publisher agent analyzing changes and creating PR...");
 
 			const responseResult = yield* Effect.either(
-				backend.prompt(sessionId, prompt),
+				backend.prompt(sessionId, prompt, {
+					format: { type: "json_schema", schema: PUBLISHER_SCHEMA },
+				}),
 			);
 
 			if (Either.isLeft(responseResult)) {
 				const error = responseResult.left.message;
 				yield* logError(`Publisher agent failed: ${error}`);
-				return yield* new PublishError({
-					message: `Publisher agent failed: ${error}`,
-				});
+				return yield* Effect.fail(
+					new PublishError({
+						message: `Publisher agent failed: ${error}`,
+					}),
+				);
 			}
 
 			const response = responseResult.right;
 			const result = parsePublisherOutput(response.text);
-
 			if (!result.success) {
 				yield* logError(`Publisher failed: ${result.summary}`);
-				return yield* new PublishError({
-					message: result.summary,
-				});
+				return yield* Effect.fail(
+					new PublishError({
+						message: result.summary,
+					}),
+				);
 			}
 
 			yield* logSuccess(`Publisher complete: ${result.prUrl}`);
@@ -138,6 +142,26 @@ interface ParsedOutput {
 }
 
 function parsePublisherOutput(text: string): ParsedOutput {
+	// Try to parse as JSON first (structured output)
+	try {
+		const parsed = JSON.parse(text);
+		if (
+			parsed &&
+			typeof parsed === "object" &&
+			typeof parsed.success === "boolean"
+		) {
+			return {
+				success: parsed.success,
+				prUrl: parsed.prUrl ?? "",
+				commitHash: parsed.commitHash ?? "",
+				summary: parsed.summary ?? "",
+			};
+		}
+	} catch {
+		// Fall back to parsing summary block
+	}
+
+	// Fallback: try to extract from summary code block
 	const summaryMatch = text.match(/```summary\n([\s\S]*?)```/);
 	if (!summaryMatch?.[1]) {
 		return {

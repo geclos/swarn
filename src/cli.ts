@@ -69,16 +69,14 @@ export function readPlan(
 	config: SwarnConfig,
 ): Effect.Effect<string, ValidationError> {
 	return Effect.gen(function* () {
-		if (config.planSource) {
+		const planSource = config.planSource;
+		if (planSource) {
 			// Could be a file path or inline text
-			if (
-				config.planSource.startsWith("[") ||
-				config.planSource.startsWith("{")
-			) {
-				return config.planSource;
+			if (planSource.startsWith("[") || planSource.startsWith("{")) {
+				return planSource;
 			}
 			return yield* Effect.try({
-				try: () => readFileSync(resolve(config.planSource!), "utf-8"),
+				try: () => readFileSync(resolve(planSource), "utf-8"),
 				catch: (error) =>
 					new ValidationError({
 						message: `Failed to read plan file: ${error}`,

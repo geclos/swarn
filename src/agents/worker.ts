@@ -4,6 +4,23 @@ import type { PromptError, SessionError } from "../models/errors.js";
 import type { Task, TaskResult } from "../models/task.js";
 import { logError, logWorker } from "../output/logger.js";
 
+const WORKER_SCHEMA = {
+	type: "object",
+	properties: {
+		filesModified: {
+			type: "array",
+			items: { type: "string" },
+			description: "Array of file paths that were created or modified",
+		},
+		summary: {
+			type: "string",
+			description:
+				"One paragraph describing what was done to complete the task",
+		},
+	},
+	required: ["filesModified", "summary"],
+};
+
 function workerPrompt(task: Task): string {
 	let prompt = `You are a focused engineer implementing one specific task. Complete the task fully — no TODOs, no placeholders. Follow existing code patterns and conventions. Stay within scope (only modify files relevant to the task). Run tests/lint if available to verify work. When done, summarize what you changed.
 
@@ -20,11 +37,9 @@ ${task.description}`;
 	}
 
 	prompt += `\n\n## Output Format
-When you are done, end your response with a summary block:
-\`\`\`summary
-Files modified: <comma-separated list of files you created or modified>
-Summary: <one paragraph describing what you did>
-\`\`\``;
+When you are done, output a JSON object with:
+- filesModified: Array of file paths you created or modified
+- summary: One paragraph describing what you did to complete the task`;
 
 	return prompt;
 }
@@ -76,7 +91,9 @@ export function executeWorker(
 			const prompt = workerPrompt(task);
 
 			const responseResult = yield* Effect.either(
-				backend.prompt(sessionId, prompt),
+				backend.prompt(sessionId, prompt, {
+					format: { type: "json_schema", schema: WORKER_SCHEMA },
+				}),
 			);
 
 			if (Either.isLeft(responseResult)) {
@@ -92,7 +109,7 @@ export function executeWorker(
 			}
 
 			const response = responseResult.right;
-			const result = parseSummary(response.text, task.filePaths);
+			const result = parseWorkerOutput(response.text, task.filePaths);
 			yield* logWorker(
 				sessionId,
 				`Done: ${task.title} — ${result.filesModified.length} files`,
@@ -111,7 +128,25 @@ export function executeWorker(
 	});
 }
 
-function parseSummary(text: string, fallbackFiles: string[]): TaskResult {
+function parseWorkerOutput(text: string, fallbackFiles: string[]): TaskResult {
+	try {
+		const parsed = JSON.parse(text);
+		if (
+			parsed &&
+			typeof parsed === "object" &&
+			Array.isArray(parsed.filesModified) &&
+			typeof parsed.summary === "string"
+		) {
+			return {
+				summary: parsed.summary,
+				filesModified: parsed.filesModified,
+			};
+		}
+	} catch {
+		// Fall back to parsing summary block if JSON parsing fails
+	}
+
+	// Fallback: try to extract from summary code block
 	const summaryMatch = text.match(/```summary\n([\s\S]*?)```/);
 	if (!summaryMatch?.[1]) {
 		return {

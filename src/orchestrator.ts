@@ -33,6 +33,7 @@ export function orchestrate(
 			totalCost: 0,
 			filesChanged: [],
 			duration: 0,
+			worktreePath: config.workingDir,
 		};
 
 		for (let iteration = 1; iteration <= config.maxIterations; iteration++) {

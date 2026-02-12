@@ -31,6 +31,10 @@ interface PromptParams {
 	system?: string;
 	variant?: string;
 	parts: Array<{ type: "text"; text: string }>;
+	format?: {
+		type: "json_schema";
+		schema: object;
+	};
 }
 
 export class OpenCodeBackend implements AgentBackend {
@@ -43,21 +47,6 @@ export class OpenCodeBackend implements AgentBackend {
 
 	constructor(serverUrl: string) {
 		this.client = createOpencodeClient({ baseUrl: serverUrl });
-		void this.subscribeToEvents();
-	}
-
-	private async subscribeToEvents(): Promise<void> {
-		try {
-			const events = await this.client.event.subscribe();
-			globalThis.console.log("Event subscription started");
-			for await (const event of events.stream) {
-				globalThis.console.log(
-					`Event: ${event.type} ${JSON.stringify(event.properties)}`,
-				);
-			}
-		} catch (error) {
-			globalThis.console.log(`Event subscription error: ${error}`);
-		}
 	}
 
 	allowAllPermissions(): Effect.Effect<void, never> {
@@ -163,6 +152,10 @@ export class OpenCodeBackend implements AgentBackend {
 
 				if (useModel && model) {
 					params.model = model;
+				}
+
+				if (opts?.format) {
+					params.format = opts.format;
 				}
 
 				return this.client.session.prompt(params, {
