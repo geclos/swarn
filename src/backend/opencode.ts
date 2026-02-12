@@ -1,77 +1,291 @@
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
-import type { AgentBackend, SessionOpts, PromptOpts, AgentResponse } from "./interface.js"
-import { log } from "../output/logger.js"
+import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/v2";
+import { Effect, Either } from "effect";
+import { PromptError, SessionError } from "../models/errors.js";
+import { logDebug } from "../output/logger.js";
+import type {
+	AgentBackend,
+	AgentResponse,
+	PromptOpts,
+	SessionOpts,
+} from "./interface.js";
 
 export class OpenCodeBackend implements AgentBackend {
-  private client: OpencodeClient
+	private client: OpencodeClient;
+	private sessionDirs = new Map<string, string>();
+	private sessionModels = new Map<
+		string,
+		{ providerID: string; modelID: string }
+	>();
 
-  constructor(serverUrl: string) {
-    this.client = createOpencodeClient({ baseUrl: serverUrl })
-  }
+	constructor(serverUrl: string) {
+		this.client = createOpencodeClient({ baseUrl: serverUrl });
+		void this.subscribeToEvents();
+	}
 
-  async createSession(opts: SessionOpts): Promise<string> {
-    const resp = await this.client.session.create({
-      body: { title: opts.title },
-      query: { directory: opts.workingDir },
-    })
-    if (!resp.data) {
-      throw new Error(`Failed to create session: ${JSON.stringify(resp.error)}`)
-    }
-    log.debug(`Created session ${resp.data.id} for "${opts.title}"`)
-    return resp.data.id
-  }
+	private async subscribeToEvents(): Promise<void> {
+		try {
+			const events = await this.client.event.subscribe();
+			globalThis.console.log("Event subscription started");
+			for await (const event of events.stream) {
+				globalThis.console.log(
+					`Event: ${event.type} ${JSON.stringify(event.properties)}`,
+				);
+			}
+		} catch (error) {
+			globalThis.console.log(`Event subscription error: ${error}`);
+		}
+	}
 
-  async destroySession(sessionId: string): Promise<void> {
-    await this.client.session.delete({
-      path: { id: sessionId },
-    })
-    log.debug(`Destroyed session ${sessionId}`)
-  }
+	allowAllPermissions(): Effect.Effect<void, never> {
+		return Effect.gen(this, function* () {
+			const result = yield* Effect.either(
+				Effect.tryPromise(() =>
+					this.client.global.config.update({
+						config: {
+							permission: { "*": "allow", external_directory: "allow" },
+						} as any,
+					}),
+				),
+			);
 
-  async prompt(sessionId: string, message: string, opts?: PromptOpts): Promise<AgentResponse> {
-    const resp = await this.client.session.prompt({
-      path: { id: sessionId },
-      body: {
-        parts: [{ type: "text", text: message }],
-        agent: opts?.agent ?? "code",
-      },
-    })
+			if (Either.isLeft(result)) {
+				yield* logDebug(`Failed to set permissions: ${result.left}`);
+			}
+		});
+	}
 
-    if (!resp.data) {
-      throw new Error(`Prompt failed for session ${sessionId}: ${JSON.stringify(resp.error)}`)
-    }
+	createSession(opts: SessionOpts): Effect.Effect<string, SessionError> {
+		return Effect.gen(this, function* () {
+			const result = yield* Effect.either(
+				Effect.tryPromise(() =>
+					this.client.session.create(
+						{
+							directory: opts.workingDir,
+							title: opts.title,
+						},
+						{
+							headers: { "x-opencode-directory": opts.workingDir },
+						},
+					),
+				),
+			);
 
-    const { info, parts } = resp.data
-    const textParts = parts
-      .filter((p): p is Extract<typeof p, { type: "text" }> => "type" in p && p.type === "text")
-      .map((p) => p.text)
+			if (Either.isLeft(result)) {
+				return yield* new SessionError({
+					message: `Failed to create session: ${result.left}`,
+				});
+			}
 
-    return {
-      text: textParts.join("\n"),
-      parts,
-      tokens: { input: info.tokens.input, output: info.tokens.output },
-      cost: info.cost,
-    }
-  }
+			const resp = result.right;
+			if (!resp.data) {
+				return yield* new SessionError({
+					message: `Failed to create session: ${JSON.stringify(resp.error)}`,
+				});
+			}
 
-  async getStatus(sessionId: string): Promise<"idle" | "busy" | "error"> {
-    try {
-      const resp = await this.client.session.status({})
-      if (!resp.data) return "error"
-      const status = resp.data[sessionId]
-      if (!status) return "idle"
-      return status.type === "busy" ? "busy" : "idle"
-    } catch {
-      return "error"
-    }
-  }
+			this.sessionDirs.set(resp.data.id, opts.workingDir);
+			if (opts.model) {
+				this.sessionModels.set(resp.data.id, opts.model);
+			}
+			yield* logDebug(`Created session ${resp.data.id} for "${opts.title}"`);
+			return resp.data.id;
+		});
+	}
 
-  async healthCheck(): Promise<boolean> {
-    try {
-      await this.client.session.list({})
-      return true
-    } catch {
-      return false
-    }
-  }
+	destroySession(sessionId: string): Effect.Effect<void, never> {
+		return Effect.gen(this, function* () {
+			const directory = this.sessionDirs.get(sessionId);
+
+			yield* Effect.either(
+				Effect.tryPromise(() =>
+					this.client.session.delete(
+						{ sessionID: sessionId, directory },
+						directory
+							? { headers: { "x-opencode-directory": directory } }
+							: undefined,
+					),
+				),
+			);
+
+			this.sessionDirs.delete(sessionId);
+			this.sessionModels.delete(sessionId);
+			yield* logDebug(`Destroyed session ${sessionId}`);
+		});
+	}
+
+	prompt(
+		sessionId: string,
+		message: string,
+		opts?: PromptOpts,
+	): Effect.Effect<AgentResponse, PromptError> {
+		return Effect.gen(this, function* () {
+			const directory = this.sessionDirs.get(sessionId);
+			const model = this.sessionModels.get(sessionId);
+
+			const runPrompt = async (useModel: boolean) => {
+				const params: any = {
+					sessionID: sessionId,
+					directory,
+					parts: [{ type: "text", text: message }],
+					noReply: false,
+				};
+
+				if (opts?.agent) {
+					params.agent = opts.agent;
+				}
+
+				if (useModel && model) {
+					params.model = model;
+				}
+
+				return this.client.session.prompt(params, {
+					headers: directory
+						? { "x-opencode-directory": directory }
+						: undefined,
+				});
+			};
+
+			const t0 = Date.now();
+			yield* logDebug(
+				`Sending prompt to session ${sessionId} (${message.length} chars)...`,
+			);
+
+			const result = yield* Effect.either(
+				Effect.tryPromise(() => runPrompt(true)),
+			);
+
+			if (Either.isLeft(result)) {
+				return yield* new PromptError({
+					message: `Prompt failed: ${result.left}`,
+					sessionId,
+				});
+			}
+
+			let promptResp = result.right;
+			yield* logDebug(
+				`Prompt response received in ${((Date.now() - t0) / 1000).toFixed(1)}s — status ${promptResp.response.status} content-type ${promptResp.response.headers.get("content-type") ?? "none"}`,
+			);
+
+			if (!promptResp.data) {
+				return yield* new PromptError({
+					message: `Prompt failed: ${JSON.stringify(promptResp.error)}`,
+					sessionId,
+				});
+			}
+
+			let info = (promptResp.data as any).info;
+			let parts = (promptResp.data as any).parts ?? [];
+			let textParts = parts
+				.filter((p: any) => p.type === "text")
+				.map((p: any) => p.text);
+
+			if (textParts.length === 0 && model) {
+				yield* logDebug(
+					"Prompt returned no text parts, retrying without explicit model...",
+				);
+
+				const retryResult = yield* Effect.either(
+					Effect.tryPromise(() => runPrompt(false)),
+				);
+
+				if (Either.isLeft(retryResult)) {
+					return yield* new PromptError({
+						message: `Prompt retry failed: ${retryResult.left}`,
+						sessionId,
+					});
+				}
+
+				promptResp = retryResult.right;
+				if (!promptResp.data) {
+					return yield* new PromptError({
+						message: `Prompt retry failed: ${JSON.stringify(promptResp.error)}`,
+						sessionId,
+					});
+				}
+
+				info = (promptResp.data as any).info;
+				parts = (promptResp.data as any).parts ?? [];
+				textParts = parts
+					.filter((p: any) => p.type === "text")
+					.map((p: any) => p.text);
+			}
+
+			if (textParts.length === 0) {
+				const respData = (promptResp as any).data;
+				const partTypes = parts.map((p: any) => p.type).join(", ");
+				const infoKeys =
+					info && typeof info === "object"
+						? Object.keys(info).join(", ")
+						: "none";
+				const dataKeys =
+					respData && typeof respData === "object"
+						? Object.keys(respData as object).join(", ")
+						: "none";
+				const dataType = respData === null ? "null" : typeof respData;
+				const dataPreview =
+					typeof respData === "string" ? respData.slice(0, 200) : "";
+				yield* logDebug(
+					`Prompt response had no text parts. Part types: ${partTypes || "none"}`,
+				);
+				yield* logDebug(
+					`Prompt data keys: ${dataKeys || "none"} info keys: ${infoKeys || "none"}`,
+				);
+				yield* logDebug(
+					`Prompt data type: ${dataType}${dataPreview ? ` preview=${dataPreview}` : ""}`,
+				);
+			}
+
+			if (info?.error) {
+				return yield* new PromptError({
+					message: `Agent error: ${JSON.stringify(info.error)}`,
+					sessionId,
+				});
+			}
+
+			return {
+				text: textParts.join("\n"),
+				parts,
+				tokens: {
+					input: info?.tokens?.input ?? 0,
+					output: info?.tokens?.output ?? 0,
+				},
+				cost: info?.cost ?? 0,
+			};
+		});
+	}
+
+	getStatus(
+		sessionId: string,
+	): Effect.Effect<"idle" | "busy" | "error", never> {
+		return Effect.gen(this, function* () {
+			const result = yield* Effect.either(
+				Effect.tryPromise(() => this.client.session.status({})),
+			);
+
+			if (Either.isLeft(result)) {
+				return "error";
+			}
+
+			const resp = result.right;
+			if (!resp.data) return "error";
+			const status = resp.data[sessionId];
+			if (!status) return "idle";
+			return status.type === "busy" ? "busy" : "idle";
+		});
+	}
+
+	healthCheck(): Effect.Effect<boolean, never> {
+		return Effect.gen(this, function* () {
+			const result = yield* Effect.either(
+				Effect.tryPromise(() => this.client.session.list({})),
+			);
+
+			if (Either.isLeft(result)) {
+				return false;
+			}
+
+			const resp = result.right;
+			return resp.data !== undefined;
+		});
+	}
 }
