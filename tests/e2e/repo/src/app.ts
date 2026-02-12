@@ -1,3 +1,4 @@
-export function greet(name: string): string {
-  return `Hello, ${name}`
+export function greet(name: string, excited?: boolean): string {
+	const message = `Hello, ${name}`;
+	return excited ? `${message.toUpperCase()}!!!` : message;
 }
