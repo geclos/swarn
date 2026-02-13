@@ -97,6 +97,32 @@ bun run format
 bun test
 ```
 
+## Dashboard
+
+```bash
+# Run the dashboard runtime server (default: http://127.0.0.1:4173)
+bun run dashboard
+
+# Run the Solid UI in Vite dev mode
+bun run dashboard:ui:dev
+
+# Build only the Solid UI bundle into src/dashboard/ui/dist/
+bun run dashboard:ui:build
+
+# Build the UI and launch the runtime server
+bun run dashboard:build
+
+# Run dashboard-focused backend tests
+bun test src/dashboard
+```
+
+### Dashboard Troubleshooting
+
+- `EADDRINUSE` or startup bind errors: set a different port with `DASHBOARD_PORT=4273 bun run dashboard`.
+- Missing DB data (`[]` from `/api/swarms`): ensure swarm runs have created `~/.swarn/swarm.db` and you are using the same user/home directory.
+- Dashboard UI shows stale/missing assets: rebuild with `bun run dashboard:ui:build` and then restart `bun run dashboard`.
+- Vite dev mode API calls: the UI fetches `/api/*` on the same origin, so run it behind a proxy to the dashboard server if you need live UI HMR plus backend data.
+
 ## Tech Stack
 
 - **Runtime**: Bun

@@ -1,27 +1,35 @@
 {
-  "name": "swarn",
-  "version": "0.1.0",
-  "description": "Agentic swarm platform — execute plans with parallel worker agents",
-  "type": "module",
-  "bin": {
-    "swarn": "./src/index.ts"
-  },
-  "scripts": {
-    "dev": "bun run src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target bun",
-    "tc": "tsc --noEmit",
-    "lint": "biome check src",
-    "format": "biome format src --write",
-    "check": "biome check src --write"
-  },
-  "dependencies": {
-    "@opencode-ai/sdk": "latest",
-    "drizzle-orm": "^0.45.1",
-    "effect": "^3.19.16"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.3.15",
-    "@types/bun": "latest",
-    "typescript": "^5.8.0"
-  }
+	"name": "swarn",
+	"version": "0.1.0",
+	"description": "Agentic swarm platform — execute plans with parallel worker agents",
+	"type": "module",
+	"bin": {
+		"swarn": "./src/index.ts"
+	},
+	"scripts": {
+		"dev": "bun run src/index.ts",
+		"build": "bun build src/index.ts --outdir dist --target bun",
+		"dashboard": "bun run src/dashboard/server.ts",
+		"dashboard:ui:dev": "bunx vite --config src/dashboard/ui/vite.config.ts",
+		"dashboard:ui:build": "bunx vite build --config src/dashboard/ui/vite.config.ts",
+		"dashboard:build": "bun run dashboard:ui:build && bun run dashboard",
+		"tc": "tsc --noEmit",
+		"lint": "biome check src",
+		"format": "biome format src --write",
+		"check": "biome check src --write"
+	},
+	"dependencies": {
+		"@solidjs/router": "^0.15.3",
+		"@opencode-ai/sdk": "latest",
+		"drizzle-orm": "^0.45.1",
+		"effect": "^3.19.16",
+		"solid-js": "^1.9.9"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.15",
+		"@types/bun": "latest",
+		"vite": "^7.1.5",
+		"vite-plugin-solid": "^2.11.8",
+		"typescript": "^5.8.0"
+	}
 }
